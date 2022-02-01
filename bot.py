@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import NoSuchElementException
+from selenium.common.exceptions import NoSuchElementException, ElementNotInteractableException
 
 #access https://salty.imaprettykitty.com/live/ and find the win rates for each fighter
 #use math to figure out how much to bet
@@ -54,8 +54,7 @@ def start_saltybet():
   sign_in_button.click()
   logger.info("SIGN IN COMPLETE")
 
-  driver.implicitly_wait(9999) #wait for page to load and find balance.
-  balance = int(driver.find_element(By.XPATH, "//span[@class='dollar'] | //span[@class='dollar purpletext']").text.replace(",", ""))
+  balance = get_balance(driver)
   logger.info(f"STARTING BALANCE: {balance}")
   logger.info(f"BETTING MODE: {MODE}")
 
@@ -66,7 +65,7 @@ def start_saltybet():
 
     driver.implicitly_wait(9999) #wait to get new balance
     past_balance = balance
-    balance = int(driver.find_element(By.XPATH, "//span[@class='dollar'] | //span[@class='dollar purpletext']").text.replace(",", ""))
+    balance = get_balance(driver)
     if balance > past_balance:
       logger.info(f"{loop}. WON! Made ${balance - past_balance}")
     elif balance < past_balance:
@@ -118,31 +117,37 @@ def start_saltybet():
       logger.info(f"{loop}. Winrates are {one}% vs {two}%. Engine gives {percentage_bet}% of balance to bet. Current balance is ${balance}. To Bet: ${to_bet}")
 
     #bet
-    wager_field.clear()
-    wager_field.send_keys(to_bet)
+    try:
+      wager_field.clear()
+      wager_field.send_keys(to_bet)
+      if MODE not in UNDERDOG_BETTING_MODES: #overdog betting, list is all underdog betting modes
+        if one > two:
+          one_button = driver.find_element(By.XPATH, "//input[@name='player1']")
+          one_button.click()
+        else:
+          two_button = driver.find_element(By.XPATH, "//input[@name='player2']")
+          two_button.click()
+      else:
+        if one <= two:
+          one_button = driver.find_element(By.XPATH, "//input[@name='player1']")
+          one_button.click()
+        else:
+          two_button = driver.find_element(By.XPATH, "//input[@name='player2']")
+          two_button.click()
+    except ElementNotInteractableException: #Sometimes the data takes too long to get back and the field disables before we can bet. Just skip the round.
+      pass
 
-    if MODE not in UNDERDOG_BETTING_MODES: #overdog betting, list is all underdog betting modes
-      if one > two:
-        one_button = driver.find_element(By.XPATH, "//input[@name='player1']")
-        one_button.click()
-      else:
-        two_button = driver.find_element(By.XPATH, "//input[@name='player2']")
-        two_button.click()
-    else:
-      if one <= two:
-        one_button = driver.find_element(By.XPATH, "//input[@name='player1']")
-        one_button.click()
-      else:
-        two_button = driver.find_element(By.XPATH, "//input[@name='player2']")
-        two_button.click()
+    
 
     #driver waits until it find the disabled wager button, then it loops and waits for the wager to reopen.
     driver.implicitly_wait(9999)
     disabled_wager = driver.find_element(By.XPATH, "//input[@style='border-color: black; display: none;']")
-    time.sleep(5) #can't use implicit wait because they already exist, just have to wait after wager closes for it to update.
     try:
+      driver.implicitly_wait(5)
       to_gain = driver.find_elements(By.XPATH, "//span[@id='lastbet']/span")[1].text #uglier than assigning to list then multiple assignment, but I kept getting StaleElementReferenceExceptions
+      driver.implicitly_wait(1)
       odds_1 = driver.find_elements(By.XPATH, "//span[@id='lastbet']/span")[2].text
+      driver.implicitly_wait(1)
       odds_2 = driver.find_elements(By.XPATH, "//span[@id='lastbet']/span")[3].text
     except IndexError:
       pass
@@ -169,6 +174,17 @@ def get_data():
   # know im navigating a tightrope geting these data points, but I dont think this site is changing anytime soon. very simple html.
   data_driver.close()
   return fighter_one, fighter_two
+
+def get_balance(driver):
+  driver.implicitly_wait(9999) #wait for page to load and find balance.
+  balance = driver.find_element(By.XPATH, "//span[@class='dollar'] | //span[@class='dollar purpletext']").text
+  balance = balance.replace(",", "") #get rid of commas (1,000 > 1000)
+  try:
+    balance = int(balance)
+    return balance
+  except ValueError: #If there is ever an error getting the balance, just say we have 1 until we get it again (next fight)
+    return 1
+
 
 if __name__ == "__main__":
   start_saltybet()
