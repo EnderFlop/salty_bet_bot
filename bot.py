@@ -2,10 +2,12 @@ import os
 import math
 import time
 import logging
+from sys import platform
 from dotenv import load_dotenv
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.common.exceptions import NoSuchElementException, ElementNotInteractableException, StaleElementReferenceException
 
 #access https://salty.imaprettykitty.com/live/ and find the win rates for each fighter
@@ -20,6 +22,8 @@ PASSWORD = os.environ.get("PASSWORD")
 #Personal Credentials (for farming # of bets)
 SELF_EMAIL = os.environ.get("SELF_EMAIL")
 SELF_PASSWORD = os.environ.get("SELF_PASSWORD")
+WINDOWS_PATH = os.environ.get("WINDOWS_PATH")
+LINUX_PATH = os.environ.get("LINUX_PATH")
 
 #Betting Mode
 MODE = 4
@@ -33,6 +37,10 @@ chrome_options = Options()
 chrome_options.add_argument("headless") #Runs Chrome without opening windows
 chrome_options.add_experimental_option("excludeSwitches", ["enable-logging"]) #disables DevTools listening messages
 chrome_options.add_argument("--log-level=3") #mutes non-essential logging from chrome
+if platform == "linux" or platform == "linux2":
+  service = Service(LINUX_PATH)
+elif platform == "win32":
+  service = Service(WINDOWS_PATH)
 
 logging.basicConfig(filename="operation.log", format="%(asctime)s %(message)s", filemode="a")
 logger = logging.getLogger()
@@ -42,7 +50,7 @@ email, password = EMAIL, PASSWORD
 #email, password = SELF_EMAIL, SELF_PASSWORD
 
 def start_saltybet():
-  driver = webdriver.Chrome(options=chrome_options)
+  driver = webdriver.Chrome(service=service, options=chrome_options)
   
   #signin
   driver.get("https://www.saltybet.com/authenticate?signin=1") #saltybet login page
@@ -167,7 +175,7 @@ def start_saltybet():
     logger.info(f"{loop}. Odds are {odds_1}:{odds_2}. ${to_bet} -> {to_gain} potential")
 
 def get_data():
-  data_driver = webdriver.Chrome(options=chrome_options)
+  data_driver = webdriver.Chrome(service=service, options=chrome_options)
   data_driver.get("https://salty.imaprettykitty.com/live/")
   data_driver.implicitly_wait(9999) #always wait until site loads
   winrates = data_driver.find_elements(By.XPATH, "//table[@style='margin-top: -16px; margin-bottom: 0px;']/tbody/tr[3]/td[2]")
