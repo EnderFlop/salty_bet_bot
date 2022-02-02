@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import NoSuchElementException, ElementNotInteractableException
+from selenium.common.exceptions import NoSuchElementException, ElementNotInteractableException, StaleElementReferenceException
 
 #access https://salty.imaprettykitty.com/live/ and find the win rates for each fighter
 #use math to figure out how much to bet
@@ -149,8 +149,10 @@ def start_saltybet():
       odds_1 = driver.find_elements(By.XPATH, "//span[@id='lastbet']/span")[2].text
       driver.implicitly_wait(1)
       odds_2 = driver.find_elements(By.XPATH, "//span[@id='lastbet']/span")[3].text
-    except IndexError:
-      pass
+    except (IndexError, StaleElementReferenceException):
+      to_gain = "error"
+      odds_1 = "error"
+      odds_2 = "error"
 
     if MODE not in UNDERDOG_BETTING_MODES:
       if one > two: #add some flair to the chosen fighter's odds.
