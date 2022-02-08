@@ -2,6 +2,7 @@ import os
 import math
 import time
 import logging
+import csv
 from sys import platform
 from dotenv import load_dotenv
 from selenium import webdriver
@@ -68,16 +69,9 @@ def start_saltybet():
 
   loop = 0
   while True:
+    error, tournament, exhibition = 0, 0, 0
     driver.implicitly_wait(9999) #wait until the wager field shows up
     wager_field = driver.find_element(By.XPATH, "//input[@style='border-color: rgb(77, 176, 68); display: inline-block;']") #wait for the wager box to show up/fight to be over
-
-    driver.implicitly_wait(9999) #wait to get new balance
-    past_balance = balance
-    balance = get_balance(driver)
-    if balance > past_balance:
-      logger.info(f"{loop}. WON! Made ${balance - past_balance}")
-    elif balance < past_balance:
-      logger.info(f"{loop}. LOST... Lost ${past_balance - balance}")
 
     #START OF BETTING LOOP
 
@@ -85,8 +79,8 @@ def start_saltybet():
     logger.info(f"{loop}. Fight Number {loop}")
 
     #get data and decide bet
-    one, two = get_data()
-    win_percent_difference = abs(one - two)
+    name1, name2, win1, win2, loss1, loss2, rate1, rate2 = get_data()
+    win_percent_difference = abs(rate1 - rate2)
     #Using the equation 0.01 * x^2 to determine bet number.
     #Plug in the percent difference (0-100)
     #Get back the answer y (0-100). Possible points include (0,0), (5, 0.25), (10, 1), (25, 6.25), (100, 100)
@@ -98,12 +92,13 @@ def start_saltybet():
       driver.implicitly_wait(1)
       tournament = driver.find_element(By.XPATH, "//span[@id='tournament-note']") #If the tag exists, we are in a tournament
       POVERTY_LIMIT = 3000
+      tournament = 1
     except NoSuchElementException:
       POVERTY_LIMIT = 500
 
     if balance < POVERTY_LIMIT: #Since the floor is around $200, always go all in until you get out of poverty.
       to_bet = balance
-      logger.info(f"{loop}. Odds are {one}% vs {two}%. Current balance is ${balance}. BELOW POVERTY LIMIT! To Bet: ${to_bet}")
+      logger.info(f"{loop}. Odds are {rate1}% vs {rate2}%. Current balance is ${balance}. BELOW POVERTY LIMIT! To Bet: ${to_bet}")
     else:
 
       if MODE == 1: #ADVANCED BETTING (use the 0.01x^2 formula)
@@ -122,27 +117,28 @@ def start_saltybet():
       #multiply the balance by the percentage (scaled by 0.01 for math). Get the floor to remove the decimal. Add 1 to always bet at least 1.
       to_bet = math.floor(balance * (percentage_bet / 100)) + 1
 
-      logger.info(f"{loop}. Winrates are {one}% vs {two}%. Engine gives {percentage_bet}% of balance to bet. Current balance is ${balance}. To Bet: ${to_bet}")
+      logger.info(f"{loop}. Winrates are {rate1}% vs {rate2}%. Engine gives {percentage_bet}% of balance to bet. Current balance is ${balance}. To Bet: ${to_bet}")
 
     #bet
     try:
       wager_field.clear()
       wager_field.send_keys(to_bet)
       if MODE not in UNDERDOG_BETTING_MODES: #overdog betting, list is all underdog betting modes
-        if one > two:
+        if rate1 > rate2:
           one_button = driver.find_element(By.XPATH, "//input[@name='player1']")
           one_button.click()
         else:
           two_button = driver.find_element(By.XPATH, "//input[@name='player2']")
           two_button.click()
       else:
-        if one <= two:
+        if rate1 <= rate2:
           one_button = driver.find_element(By.XPATH, "//input[@name='player1']")
           one_button.click()
         else:
           two_button = driver.find_element(By.XPATH, "//input[@name='player2']")
           two_button.click()
     except ElementNotInteractableException: #Sometimes the data takes too long to get back and the field disables before we can bet. Just skip the round.
+      error = 1
       pass
 
     
@@ -152,38 +148,75 @@ def start_saltybet():
     disabled_wager = driver.find_element(By.XPATH, "//input[@style='border-color: black; display: none;']")
     try:
       driver.implicitly_wait(5)
-      to_gain = driver.find_elements(By.XPATH, "//span[@id='lastbet']/span")[1].text #uglier than assigning to list then multiple assignment, but I kept getting StaleElementReferenceExceptions
-      driver.implicitly_wait(1)
-      odds_1 = driver.find_elements(By.XPATH, "//span[@id='lastbet']/span")[2].text
-      driver.implicitly_wait(1)
-      odds_2 = driver.find_elements(By.XPATH, "//span[@id='lastbet']/span")[3].text
-    except (IndexError, StaleElementReferenceException):
+      _, to_gain, odds_1, odds_2 = driver.find_elements(By.XPATH, "//span[@id='lastbet']/span")
+      to_gain, odds_1, odds_2 = to_gain.text, float(odds_1.text), float(odds_2.text)
+
+    except (IndexError, ValueError, StaleElementReferenceException): #indexerror for problems, valueerror if we didn't bet in time, SERE if the element expires before we can read it
       to_gain = "error"
       odds_1 = "error"
       odds_2 = "error"
+      error =  1
 
     if MODE not in UNDERDOG_BETTING_MODES:
-      if one > two: #add some flair to the chosen fighter's odds.
-        odds_1 = f"*{odds_1}*"
+      if rate1 > rate2: #bet_on is 0 already if we bet on fighter one, 1 if we bet on fighter two
+        bet_on = 0
       else:
-        odds_2 = f"*{odds_2}*"
+        bet_on = 1
     else:
-      if one <= two:
-        odds_1 = f"*{odds_1}*"
+      if rate1 <= rate2:
+        bet_on = 0
       else:
-        odds_2 = f"*{odds_2}*"
+        bet_on = 1
     logger.info(f"{loop}. Odds are {odds_1}:{odds_2}. ${to_bet} -> {to_gain} potential")
+
+    while True:
+      driver.implicitly_wait(9999) #wait for fight to end
+      betting_over = driver.find_element(By.XPATH, "//span[@id='betstatus']")
+      if betting_over.text != "Bets are locked until the next match.": #If this changes then the match is over.
+        break
+
+    driver.implicitly_wait(9999) #wait to get new balance
+    past_balance = balance
+    balance = get_balance(driver)
+    if balance > past_balance:
+      logger.info(f"{loop}. WON! Made ${balance - past_balance}")
+      outcome = bet_on
+    elif balance < past_balance:
+      logger.info(f"{loop}. LOST... Lost ${past_balance - balance}")
+      if bet_on == 0:
+        outcome = 1
+      elif bet_on == 1:
+        outcome = 0
+
+    #SAVE TO CSV (fighter_data.csv)
+    #FORMAT name1, name2, winrate1, winrate2, wins1, wins2, losses1, losses2, odds1, odds2, outcome, tournament, exhibition, error
+    #outcome "0" for fighter1, "1" for fighter2
+    #tournament / exhibition "1" if true
+    #error "1" if any exception is ever triggered
+    with open("fighter_data.csv", "a") as data:
+      writer = csv.writer(data)
+      row = [name1, name2, rate1, rate2, win1, win2, loss1, loss2, odds_1, odds_2, outcome, tournament, exhibition, error]
+      writer.writerow(row)
 
 def get_data():
   data_driver = webdriver.Chrome(service=service, options=chrome_options)
   data_driver.get("https://salty.imaprettykitty.com/live/")
   data_driver.implicitly_wait(9999) #always wait until site loads
-  winrates = data_driver.find_elements(By.XPATH, "//table[@style='margin-top: -16px; margin-bottom: 0px;']/tbody/tr[3]/td[2]")
-  fighter_one = int(winrates[0].text.replace("%", ""))
-  fighter_two = int(winrates[1].text.replace("%", ""))
+  name1, name2 = data_driver.find_elements(By.XPATH, "//div[@class='panel-heading']")
+  win1, win2 = data_driver.find_elements(By.XPATH, "//table[@style='margin-top: -16px; margin-bottom: 0px;']/tbody/tr[1]")
+  loss1, loss2 = data_driver.find_elements(By.XPATH, "//table[@style='margin-top: -16px; margin-bottom: 0px;']/tbody/tr[2]")
+  rate1, rate2 = data_driver.find_elements(By.XPATH, "//table[@style='margin-top: -16px; margin-bottom: 0px;']/tbody/tr[3]")
+  name1 = name1.textos
+  name2 = name2.text
+  win1 = int(win1.text.split()[1]) #"Wins 202" > 202
+  win2 = int(win2.text.split()[1])
+  loss1 = int(loss1.text.split()[1]) #"Losses 105" > 105
+  loss2 = int(loss2.text.split()[1])
+  rate1 = int(rate1.text.split()[2].replace("%", "")) #"Win Ratio 65%" > 65
+  rate2 = int(rate2.text.split()[2].replace("%", ""))
   # know im navigating a tightrope geting these data points, but I dont think this site is changing anytime soon. very simple html.
   data_driver.close()
-  return fighter_one, fighter_two
+  return name1, name2, win1, win2, loss1, loss2, rate1, rate2
 
 def get_balance(driver):
   driver.implicitly_wait(9999) #wait for page to load and find balance.
@@ -203,7 +236,7 @@ if __name__ == "__main__":
 #Add linux support (needs different webdriver/way to add to PATH. Maybe a different file, maybe a way to detect os and change driver accordingly? I dont know how linux PATH works)
 #Add Tournament support. It should go all in on tournaments regularly. This is as simple as detecting when a tournament is happening and raising POVERTY_LIMIT ✅
 #Add logging. Detect wins and losses after they happen (based on balance changes), record balance and how it changes. Can be done in a txt ✅
-#Start own database? This is ideal, but would take forever. It would remove an external liability, but that outside database has hundreds of data points on each fighter.
+#Start own database? This is ideal, but would take forever. It would remove an external liability, but that outside database has hundreds of data points on each fighter. ✅
 # We would be blind for a very long time as it gets to a fraction of the data it has. I wonder if I can email the admins for access to the DB directly?
 #Make MagicMirror Module that displays total balance and change over past day
 #Do something about team fights (exhibitions). Right now it uses the last solo fight odds when betting. Could check if the odds are the same and skip. Or just let it ride.
