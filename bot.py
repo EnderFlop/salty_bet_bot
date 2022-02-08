@@ -206,7 +206,7 @@ def get_data():
   win1, win2 = data_driver.find_elements(By.XPATH, "//table[@style='margin-top: -16px; margin-bottom: 0px;']/tbody/tr[1]")
   loss1, loss2 = data_driver.find_elements(By.XPATH, "//table[@style='margin-top: -16px; margin-bottom: 0px;']/tbody/tr[2]")
   rate1, rate2 = data_driver.find_elements(By.XPATH, "//table[@style='margin-top: -16px; margin-bottom: 0px;']/tbody/tr[3]")
-  name1 = name1.textos
+  name1 = name1.text
   name2 = name2.text
   win1 = int(win1.text.split()[1]) #"Wins 202" > 202
   win2 = int(win2.text.split()[1])
