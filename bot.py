@@ -187,6 +187,9 @@ def start_saltybet():
         outcome = 1
       elif bet_on == 1:
         outcome = 0
+    else: #if the balance didn't change (draw, didn't bet and match ended, etc)
+      outcome = -1
+      error = 1
 
     #SAVE TO CSV (fighter_data.csv)
     #FORMAT name1, name2, winrate1, winrate2, wins1, wins2, losses1, losses2, odds1, odds2, outcome, tournament, exhibition, error
