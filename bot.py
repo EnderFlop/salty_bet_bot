@@ -10,6 +10,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.common.exceptions import NoSuchElementException, ElementNotInteractableException, StaleElementReferenceException
+from machine_learning import make_prediction
 
 #access https://salty.imaprettykitty.com/live/ and find the win rates for each fighter
 #use math to figure out how much to bet
@@ -27,11 +28,12 @@ WINDOWS_PATH = os.environ.get("WINDOWS_PATH")
 LINUX_PATH = os.environ.get("LINUX_PATH")
 
 #Betting Mode
-MODE = 4
+MODE = 5
 #1. Advanced Betting, 0.01x^2
 #2. Simple Betting, C%
 #3. Risky Buisness, 1%:1%. linear
 #4. Airdog Simulator, bet 5% on the loser in an unbalanced matchup.
+#5. NANOMACHINES? 2% on the machine learning prediciton
 UNDERDOG_BETTING_MODES = [4]
 
 chrome_options = Options()
@@ -79,7 +81,9 @@ def start_saltybet():
     logger.info(f"{loop}. Fight Number {loop}")
 
     #get data and decide bet
-    name1, name2, win1, win2, loss1, loss2, rate1, rate2 = get_data()
+    name1, name2, win1, win2, loss1, loss2, rate1, rate2, data_error = get_data()
+    if data_error == 1:
+      error = 1
     win_percent_difference = abs(rate1 - rate2)
     #Using the equation 0.01 * x^2 to determine bet number.
     #Plug in the percent difference (0-100)
@@ -112,6 +116,8 @@ def start_saltybet():
           percentage_bet = 5 #5% bet
         else:
           percentage_bet = 0 #just bet 1 dollarydoo (0%)
+      elif MODE == 5: #NANOMACHINES?
+        percentage_bet = 2 #bet 2 percent (ai does not determine bet)
 
 
       #multiply the balance by the percentage (scaled by 0.01 for math). Get the floor to remove the decimal. Add 1 to always bet at least 1.
@@ -123,19 +129,24 @@ def start_saltybet():
     try:
       wager_field.clear()
       wager_field.send_keys(to_bet)
-      if MODE not in UNDERDOG_BETTING_MODES: #overdog betting, list is all underdog betting modes
-        if rate1 > rate2:
-          one_button = driver.find_element(By.XPATH, "//input[@name='player1']")
+      one_button = driver.find_element(By.XPATH, "//input[@name='player1']")
+      two_button = driver.find_element(By.XPATH, "//input[@name='player2']")
+      if MODE == 5: #ai betting
+        prediction = make_prediction(rate1, rate2)
+        logger.info(f"{loop}. AI DECLARES {prediction}!")
+        if prediction == 0:
           one_button.click()
         else:
-          two_button = driver.find_element(By.XPATH, "//input[@name='player2']")
           two_button.click()
-      else:
+      elif MODE not in UNDERDOG_BETTING_MODES: #overdog betting, list is all underdog betting modes
+        if rate1 > rate2:
+          one_button.click()
+        else:          
+          two_button.click()
+      elif MODE in UNDERDOG_BETTING_MODES:
         if rate1 <= rate2:
-          one_button = driver.find_element(By.XPATH, "//input[@name='player1']")
           one_button.click()
         else:
-          two_button = driver.find_element(By.XPATH, "//input[@name='player2']")
           two_button.click()
     except ElementNotInteractableException: #Sometimes the data takes too long to get back and the field disables before we can bet. Just skip the round.
       error = 1
@@ -205,21 +216,29 @@ def get_data():
   data_driver = webdriver.Chrome(service=service, options=chrome_options)
   data_driver.get("https://salty.imaprettykitty.com/live/")
   data_driver.implicitly_wait(9999) #always wait until site loads
-  name1, name2 = data_driver.find_elements(By.XPATH, "//div[@class='panel-heading']")
-  win1, win2 = data_driver.find_elements(By.XPATH, "//table[@style='margin-top: -16px; margin-bottom: 0px;']/tbody/tr[1]")
-  loss1, loss2 = data_driver.find_elements(By.XPATH, "//table[@style='margin-top: -16px; margin-bottom: 0px;']/tbody/tr[2]")
-  rate1, rate2 = data_driver.find_elements(By.XPATH, "//table[@style='margin-top: -16px; margin-bottom: 0px;']/tbody/tr[3]")
-  name1 = name1.text
-  name2 = name2.text
-  win1 = int(win1.text.split()[1]) #"Wins 202" > 202
-  win2 = int(win2.text.split()[1])
-  loss1 = int(loss1.text.split()[1]) #"Losses 105" > 105
-  loss2 = int(loss2.text.split()[1])
-  rate1 = int(rate1.text.split()[2].replace("%", "")) #"Win Ratio 65%" > 65
-  rate2 = int(rate2.text.split()[2].replace("%", ""))
+  data_error = 0
+  try:
+    name1, name2 = data_driver.find_elements(By.XPATH, "//div[@class='panel-heading']")
+    win1, win2 = data_driver.find_elements(By.XPATH, "//table[@style='margin-top: -16px; margin-bottom: 0px;']/tbody/tr[1]")
+    loss1, loss2 = data_driver.find_elements(By.XPATH, "//table[@style='margin-top: -16px; margin-bottom: 0px;']/tbody/tr[2]")
+    rate1, rate2 = data_driver.find_elements(By.XPATH, "//table[@style='margin-top: -16px; margin-bottom: 0px;']/tbody/tr[3]")
+    name1 = name1.text
+    name2 = name2.text
+    win1 = int(win1.text.split()[1]) #"Wins 202" > 202
+    win2 = int(win2.text.split()[1])
+    loss1 = int(loss1.text.split()[1]) #"Losses 105" > 105
+    loss2 = int(loss2.text.split()[1])
+    rate1 = int(rate1.text.split()[2].replace("%", "")) #"Win Ratio 65%" > 65
+    rate2 = int(rate2.text.split()[2].replace("%", ""))
+  except (ValueError, StaleElementReferenceException): #In the case of team battles, there are more than 2 vars. Since I don't care about team battles or storing them, just return as error
+    name1, name2 = "error", "error"
+    win1, win2 = 0, 0
+    loss1, loss2 = 0, 0
+    rate1, rate2 = 0, 0
+    data_error = 1
   # know im navigating a tightrope geting these data points, but I dont think this site is changing anytime soon. very simple html.
   data_driver.close()
-  return name1, name2, win1, win2, loss1, loss2, rate1, rate2
+  return name1, name2, win1, win2, loss1, loss2, rate1, rate2, data_error
 
 def get_balance(driver):
   driver.implicitly_wait(9999) #wait for page to load and find balance.
